@@ -1,0 +1,27 @@
+## Local Postgres with the pgvector extension preinstalled.
+## Matches the default DATABASE_URL in .env.example so the app works out of the box.
+##
+##   docker compose up -d      # start Postgres on localhost:5432
+##   docker compose down       # stop
+##   docker compose down -v     # stop and delete all data
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: rtoshield-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rtoshield
+    ports:
+      - "5432:5432"
+    volumes:
+      - rtoshield_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rtoshield"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  rtoshield_pgdata:

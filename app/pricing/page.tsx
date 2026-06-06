@@ -1,0 +1,7 @@
+import type { Metadata } from "next"
+import Link from "next/link"
+import { MarketingShell, Hero } from "../marketing-ui"
+
+export const metadata: Metadata = { title: "Pricing", description: "Open-source RTOShield pricing and deployment options for ecommerce fraud prevention." }
+const tiers = [{name:"Open Source", price:"$0", points:["Self-host Next.js + Supabase","Risk engine + SDK","Brand Brain","Webhook manager"]},{name:"Team", price:"Custom", points:["Managed deployment","Provider integrations","Support SLA","Advanced analytics"]},{name:"Enterprise", price:"Custom", points:["Dedicated infra","Custom models/providers","Security review","Migration support"]}]
+export default function PricingPage(){return <MarketingShell><Hero eyebrow="Pricing" title="Start open-source. Scale when ready." body="Run RTOShield locally or deploy on your own cloud. The core system is designed to be open-source and extensible."/><section className="mt-7 grid gap-5 md:grid-cols-3">{tiers.map((t,i)=><div key={t.name} className={`hover-lift rounded-[2.3rem] p-8 shadow-xl shadow-slate-900/5 ${i===1?"bg-black text-white":"bg-white"}`}><h2 className="text-3xl font-black">{t.name}</h2><div className="mt-5 text-6xl font-black">{t.price}</div><ul className="mt-8 space-y-3 text-sm opacity-80">{t.points.map(p=><li key={p}>✓ {p}</li>)}</ul><Link href="/dashboard" className={`mt-8 inline-flex rounded-full px-5 py-3 text-sm font-black ${i===1?"bg-[#ff4f0f] text-white":"bg-black text-white"}`}>Get started ↗</Link></div>)}</section></MarketingShell>}
