@@ -1,27 +1,107 @@
 import { NextRequest, NextResponse } from "next/server"
 import { trackSignalSchema } from "@/lib/zod-schemas"
-import { resolveOrgByPublicKey } from "@/lib/auth"
+import { resolveOrgByPublicKey, getAllowedHostsForOrg } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { getServiceDb } from "@/lib/db"
 import { hashPii } from "@/lib/hash"
 import { getIpIntelProvider } from "@/lib/providers"
 
 // POST /api/track — first-party SDK signal ingestion.
-// Privacy: we DO NOT accept GPS, canvas, or audio fingerprints. We hash the
-// device token and IP. We only store coarse geo + ASN/ISP from the provider.
-export async function POST(req: NextRequest) {
-	const limited = await rateLimit(req, "track", 600)
-	if (limited) return limited
+//
+// Security:
+//   - Public key only identifies the org; it grants write-only access here.
+//   - Body is size-capped and strictly validated (unknown fields rejected).
+//   - Origin is allow-listed against the org's registered store domains so a
+//     leaked public key cannot be abused from an unrelated site in a browser.
+//   - IP is derived server-side and hashed; we never trust client-supplied IP.
+//   - Rate limited per IP.
+const MAX_BODY_BYTES = 8 * 1024
 
-	const json = await req.json().catch(() => null)
+function isDev() {
+	return process.env.NODE_ENV !== "production"
+}
+
+function originHost(origin: string | null): string | null {
+	if (!origin) return null
+	try {
+		return new URL(origin).hostname.toLowerCase()
+	} catch {
+		return null
+	}
+}
+
+function isLocalHost(host: string | null): boolean {
+	return host === "localhost" || host === "127.0.0.1" || host === "[::1]"
+}
+
+// Reflect the requesting origin for write-only CORS. No credentials are used,
+// so this does not expose any cross-origin data; the POST handler enforces the
+// real per-org origin allow-list.
+function corsHeaders(origin: string | null): Record<string, string> {
+	return {
+		"Access-Control-Allow-Origin": origin ?? "*",
+		"Access-Control-Allow-Methods": "POST, OPTIONS",
+		"Access-Control-Allow-Headers": "Content-Type",
+		"Access-Control-Max-Age": "86400",
+		Vary: "Origin",
+		"X-Content-Type-Options": "nosniff",
+		"Cache-Control": "no-store",
+	}
+}
+
+export async function OPTIONS(req: NextRequest) {
+	return new NextResponse(null, { status: 204, headers: corsHeaders(req.headers.get("origin")) })
+}
+
+export async function POST(req: NextRequest) {
+	const origin = req.headers.get("origin")
+	const headers = corsHeaders(origin)
+
+	const limited = await rateLimit(req, "track", 600)
+	if (limited) {
+		for (const [k, v] of Object.entries(headers)) limited.headers.set(k, v)
+		return limited
+	}
+
+	// Reject oversized bodies early (defense against storage/CPU abuse).
+	const declaredLen = Number(req.headers.get("content-length") ?? 0)
+	if (declaredLen > MAX_BODY_BYTES) {
+		return NextResponse.json({ error: "payload_too_large" }, { status: 413, headers })
+	}
+	const raw = await req.text()
+	if (raw.length > MAX_BODY_BYTES) {
+		return NextResponse.json({ error: "payload_too_large" }, { status: 413, headers })
+	}
+
+	let json: unknown = null
+	try {
+		json = JSON.parse(raw)
+	} catch {
+		return NextResponse.json({ error: "invalid_json" }, { status: 400, headers })
+	}
+
 	const parsed = trackSignalSchema.safeParse(json)
 	if (!parsed.success) {
-		return NextResponse.json({ error: "validation_error" }, { status: 422 })
+		return NextResponse.json({ error: "validation_error" }, { status: 422, headers })
 	}
 	const body = parsed.data
 
 	const org = await resolveOrgByPublicKey(body.public_key)
-	if (!org) return NextResponse.json({ error: "invalid_public_key" }, { status: 401 })
+	if (!org) return NextResponse.json({ error: "invalid_public_key" }, { status: 401, headers })
+
+	// Origin allow-listing: if the org has registered store domains, the browser
+	// Origin must match one of them. Unconfigured orgs are allowed (onboarding),
+	// and localhost is allowed in development for local testing.
+	const allowedHosts = await getAllowedHostsForOrg(org.id)
+	if (allowedHosts.length > 0) {
+		const host = originHost(origin)
+		const ok =
+			(host && allowedHosts.includes(host)) ||
+			(isDev() && isLocalHost(host))
+		if (!ok) {
+			return NextResponse.json({ error: "origin_not_allowed" }, { status: 403, headers })
+		}
+	}
 
 	// Server-derived IP — never trust client-supplied IP.
 	const ip =
@@ -49,9 +129,6 @@ export async function POST(req: NextRequest) {
 		utm: body.utm ?? null,
 	})
 
-	// 204-style ack with CORS for first-party embedding.
-	return new NextResponse(null, {
-		status: 204,
-		headers: { "Cache-Control": "no-store" },
-	})
+	// 204 ack — write-only, no body, no caching.
+	return new NextResponse(null, { status: 204, headers })
 }

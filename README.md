@@ -175,17 +175,37 @@ Score levels: `<30 low`, `30-54 medium`, `55-79 high`, `>=80 critical`.
 | POST | `/api/webhooks/shopify?pk=...` | HMAC + public key | Shopify order webhook |
 | POST | `/api/webhooks/woocommerce?pk=...` | HMAC + public key | WooCommerce order webhook |
 
+The SDK is served publicly from `/sdk/rtoshield.js` (it lives at
+`public/sdk/rtoshield.js`). Add one tag to your storefront:
+
 ```html
-<script src="/sdk/rtoshield.js"></script>
+<script
+  src="https://app.example.com/sdk/rtoshield.js"
+  data-public-key="rtos_pk_..."
+  data-endpoint="https://app.example.com/api/track"
+  data-auto="checkout"
+  defer></script>
+```
+
+Or call the API explicitly:
+
+```html
+<script src="https://app.example.com/sdk/rtoshield.js" defer></script>
 <script>
-  RTOShield.init({ publicKey: "rtos_pk_...", endpoint: "/api/track" });
+  RTOShield.init({ publicKey: "rtos_pk_...", endpoint: "https://app.example.com/api/track" });
   RTOShield.trackCheckout();
   RTOShield.identifyOrder({ orderId: "ORDER-123" });
 </script>
 ```
 
-The SDK is first-party only: no GPS, no canvas/audio fingerprinting, no raw IP
-storage.
+The SDK is first-party only: no GPS, no canvas/audio fingerprinting, no cookies,
+no raw IP storage. The public key is not a secret; the `/api/track` endpoint
+enforces strict validation, per-IP rate limiting, and origin allow-listing
+against your connected store domains. Pin the script with Subresource Integrity
+in production.
+
+See [docs/SDK.md](docs/SDK.md) for installation, SRI, and the full security
+model.
 
 ## Optional worker
 
@@ -232,3 +252,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 MIT. See [LICENSE](LICENSE).
+"# rtoshield" 

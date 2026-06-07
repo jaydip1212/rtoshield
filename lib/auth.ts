@@ -40,3 +40,25 @@ export async function resolveOrgByPublicKey(publicKey: string): Promise<OrgRow |
 		where k.public_key = ${publicKey} limit 1`
 	return row ? { id: row.id, salt: row.salt, name: row.name } : null
 }
+
+/**
+ * Hostnames an org has registered (from connected stores). Used to allow-list
+ * the Origin of first-party SDK requests so a leaked public key cannot be
+ * abused to inject device signals from an unrelated site in a browser.
+ */
+export async function getAllowedHostsForOrg(orgId: string): Promise<string[]> {
+	const rows = (await getServiceDb().raw`
+		select domain from stores where org_id = ${orgId} and domain is not null`) as unknown as Array<{ domain: string | null }>
+	const hosts = new Set<string>()
+	for (const r of rows) {
+		const raw = (r.domain ?? "").trim().toLowerCase()
+		if (!raw) continue
+		try {
+			// Accept either a bare host ("shop.example.com") or a full URL.
+			hosts.add(raw.includes("://") ? new URL(raw).hostname : new URL(`https://${raw}`).hostname)
+		} catch {
+			/* ignore malformed domains */
+		}
+	}
+	return [...hosts]
+}
